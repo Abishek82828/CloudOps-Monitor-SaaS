@@ -1,0 +1,47 @@
+services:
+  api:
+    build: ./api
+    env_file: .env
+    ports:
+      - "8000:8000"
+    restart: always
+
+  # Host metrics + IMDS-friendly (real EC2 deployment)
+  agent:
+    build: ./agent
+    env_file: .env
+    depends_on:
+      - api
+    restart: always
+    # Read host-level CPU/RAM
+    pid: "host"
+    # Reliable IMDS access on EC2
+    network_mode: "host"
+    environment:
+      # With host networking, API is reached via localhost
+      - INGEST_URL=http://localhost:8000/ingest
+
+  worker:
+    build: ./worker
+    env_file: .env
+    depends_on:
+      - api
+    restart: always
+
+  # --- NEW SERVICE: BUDGET MONITOR ---
+  budget-watcher:
+    build: ./agent   # Reuses the agent's Python environment
+    # Overrides the default command to run the budget script instead
+    command: ["python", "budget_agent.py"]
+    env_file: .env
+    depends_on:
+      - api
+    restart: always
+    volumes:
+      # Maps the new script into the container
+      - ./agent/budget_agent.py:/app/budget_agent.py
+    environment:
+      # Since this runs in default bridge mode, it talks to 'api' (container name)
+      - INGEST_URL=http://api:8000/ingest
+      - AWS_DEFAULT_REGION=ap-south-1
+      - BUDGET_LIMIT=10.0
